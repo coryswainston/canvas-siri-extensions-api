@@ -1,7 +1,6 @@
-import os
-
-import requests
 from flask import Flask, request, redirect, jsonify
+
+import canvas_requests
 
 app = Flask(__name__)
 
@@ -15,25 +14,20 @@ def sign_in():
 @app.route('/auth/complete', methods=['GET'])
 def complete_auth():
     code = request.args['code']
-    response = requests.post(url='http://10.0.0.192/login/oauth2/token',
-                             data={
-                                 'client_id': os.environ.get('CLIENT_ID'),
-                                 'client_secret': os.environ.get('CLIENT_SECRET'),
-                                 'grant_type': 'authorization_code',
-                                 'code': code
-                             })
-    print(response.status_code)
-    token = response.json()['access_token']
-    return {'access_token': token}
+    response = canvas_requests.get_token(code)
+    return {'access_token': response['access_token']}
 
 
 @app.route('/courses', methods=['GET'])
 def get_courses():
     token = request.args['access_token']
-    response = requests.get(url='http://10.0.0.192/api/v1/courses',
-                            headers={'Authorization': f'Bearer {token}'})
+    status, response = canvas_requests.get(token, 'courses', {})
+
+    if status != 200:
+        return response, status
+
     response_list = []
-    for item in response.json():
+    for item in response:
         response_list.append({
             'name': item['name'],
             'start_date': item['start_at'],
@@ -48,12 +42,13 @@ def get_courses():
 def get_grades_for_course(course_id):
     # inputs: start/end date
     token = request.args['access_token']
-    response = requests.get(url='http://10.0.0.192/api/v1/courses?include[]=total_scores',
-                            headers={'Authorization': f'Bearer {token}'})
+    status, response = canvas_requests.get(token, 'courses',
+                                           params={'include[]': 'total_scores'})
 
-    course_list = response.json()
-    print(course_list)
-    course = [course for course in course_list if course['id'] == int(course_id)][0]
+    if status != 200:
+        return response, status
+
+    course = [course for course in response if course['id'] == int(course_id)][0]
     enrollment = course['enrollments'][0]
     print(enrollment)
 
@@ -68,12 +63,13 @@ def get_assignments():
     # inputs: start/end dates
     token = request.args['access_token']
     course_id = request.args['course_id']
-    response = requests.get(url=f'http://10.0.0.192/api/v1/courses/{course_id}/assignments',
-                            headers={'Authorization': f'Bearer {token}'},
-                            params={'per_page': 100})
+    status, response = canvas_requests.get(token, f'courses/{course_id}/assignments',
+                                           params={'per_page': 100})
+    if status != 200:
+        return response, status
 
     response_list = []
-    for item in response.json():
+    for item in response:
         response_list.append({
             'name': item['name'],
             'description': item['description'],
@@ -88,19 +84,22 @@ def get_grades_for_assignment(assignment_id):
     # change this to take a query for assignment name
     token = request.args['access_token']
     course_id = request.args['course_id']
-    response = requests.get(url=f'http://10.0.0.192/api/v1/courses/{course_id}/assignments/{assignment_id}/submissions',
-                            headers={'Authorization': f'Bearer {token}'})
 
-    submission = response.json()[0]
+    status, assignment = canvas_requests.get(token, f'courses/{course_id}/assignments/{assignment_id}',
+                                             {'include[]': 'submission'})
+    if status != 200:
+        return {}, status
 
-    response = requests.get(url=f'http://10.0.0.192/api/v1/courses/{course_id}/assignments/{assignment_id}',
-                            headers={'Authorization': f'Bearer {token}'})
+    grade = None
+    score = None
 
-    assignment = response.json()
-    print(assignment)
+    if assignment.get('submission') is not None:
+        submission = assignment.get('submission')
+        grade = submission['grade']
+        score = submission['score']
 
     return jsonify({
-        'grade': submission['grade'],
-        'score': submission['score'],
+        'grade': grade,
+        'score': score,
         'score_possible': assignment['points_possible'],
     })
