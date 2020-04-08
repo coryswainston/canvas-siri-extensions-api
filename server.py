@@ -1,6 +1,8 @@
 from flask import Flask, request, redirect, jsonify
 
 import canvas_requests
+from dateutil.parser import parse
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -60,20 +62,40 @@ def get_grades_for_course(course_id):
 
 @app.route('/assignments', methods=['GET'])
 def get_assignments():
-    # inputs: start/end dates
     token = request.args['access_token']
-    course_id = request.args['course_id']
-    status, response = canvas_requests.get(token, f'courses/{course_id}/assignments',
-                                           params={'per_page': 100})
+    # course_id = request.args['course_id'] TODO implement passing a course
+
+    status, response = canvas_requests.get(token, 'courses', {})
+    if status != 200:
+        return response, status
+
+    course_ids = [item['id'] for item in response]
+    context_ids = [f'course_{course_id}' for course_id in course_ids]
+    context_ids = ','.join(context_ids)
+
+    date_range = request.args['date_range']
+    start_date = datetime.today().strftime('%Y-%m-%d')
+    if date_range == 'thisWeek':
+        end_date = (datetime.today() + timedelta(days=7)).strftime('%Y-%m-%d')
+    else:
+        end_date = start_date
+    print(start_date)
+
+    status, response = canvas_requests.get(token, f'calendar_events',
+                                           params={'per_page': 100, 'start_date': start_date,
+                                                   'end_date': end_date, 'type': 'assignment',
+                                                   'context_codes[]': context_ids})
+
     if status != 200:
         return response, status
 
     response_list = []
     for item in response:
         response_list.append({
-            'name': item['name'],
+            'name': item['title'],
             'description': item['description'],
             'id': item['id'],
+            'due_date': item['end_at']
         })
 
     return jsonify(response_list)
