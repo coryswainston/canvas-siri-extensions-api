@@ -1,7 +1,7 @@
 from flask import Flask, request, redirect, jsonify
 
 import canvas_requests
-from dateutil.parser import parse
+import jellyfish
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -40,23 +40,33 @@ def get_courses():
     return jsonify(response_list)
 
 
-@app.route('/courses/<course_id>/grades', methods=['GET'])
-def get_grades_for_course(course_id):
-    # inputs: start/end date
+@app.route('/courses//grades', methods=['GET'])
+def get_grades_for_course():
     token = request.args['access_token']
+    query = request.args['course']
     status, response = canvas_requests.get(token, 'courses',
                                            params={'include[]': 'total_scores'})
 
     if status != 200:
         return response, status
 
-    course = [course for course in response if course['id'] == int(course_id)][0]
+    most_similar_id = 1
+    high_score = 0
+    for course in response:
+        name = course['name']
+        code = course['course_code']
+        name_sim = jellyfish.levenshtein_distance(name, query)
+        code_sim = jellyfish.levenshtein_distance(code, query)
+        if max(name_sim, code_sim) > high_score:
+            most_similar_id = course['id']
+
+    course = [course for course in response if course['id'] == most_similar_id][0]
     enrollment = course['enrollments'][0]
-    print(enrollment)
 
     return {
         'grade': enrollment['computed_current_grade'],
         'score': enrollment['computed_current_score'],
+        'course': course['name']
     }
 
 
